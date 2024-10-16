@@ -1,0 +1,90 @@
+#!/bin/bash
+
+# Load required modules
+module load fastqc/0.12.1 
+module load bedtools/2.31.0 
+module load MACS2
+module load trimmomatic/0.39
+module load sra-toolkit/3.0.5
+module load bwa/0.7.17 
+module load bowtie/2.5.1 
+module load samtools/1.17
+
+# Step 1: Download the data
+fastq-dump --split-files SRR26965367
+fastq-dump --split-files SRR26965368
+fastq-dump --split-files SRR26965369
+fastq-dump --split-files SRR26965370
+
+# Step 2: Quality control
+fastqc SRR26965367_1.fastq SRR26965367_2.fastq \
+       SRR26965368_1.fastq SRR26965368_2.fastq \
+       SRR26965369_1.fastq SRR26965369_2.fastq \
+       SRR26965370_1.fastq SRR26965370_2.fastq
+
+# Step 3: Trimming
+trimmomatic PE SRR26965367_1.fastq SRR26965367_2.fastq \
+            SRR26965367_1_paired.fastq SRR26965367_1_unpaired.fastq \
+            SRR26965367_2_paired.fastq SRR26965367_2_unpaired.fastq \
+            SLIDINGWINDOW:4:20 MINLEN:36
+
+# Repeat trimming for other samples
+trimmomatic PE SRR26965368_1.fastq SRR26965368_2.fastq \
+            SRR26965368_1_paired.fastq SRR26965368_1_unpaired.fastq \
+            SRR26965368_2_paired.fastq SRR26965368_2_unpaired.fastq \
+            SLIDINGWINDOW:4:20 MINLEN:36
+
+trimmomatic PE SRR26965369_1.fastq SRR26965369_2.fastq \
+            SRR26965369_1_paired.fastq SRR26965369_1_unpaired.fastq \
+            SRR26965369_2_paired.fastq SRR26965369_2_unpaired.fastq \
+            SLIDINGWINDOW:4:20 MINLEN:36
+
+trimmomatic PE SRR26965370_1.fastq SRR26965370_2.fastq \
+            SRR26965370_1_paired.fastq SRR26965370_1_unpaired.fastq \
+            SRR26965370_2_paired.fastq SRR26965370_2_unpaired.fastq \
+            SLIDINGWINDOW:4:20 MINLEN:36
+
+# Step 4: Download and unzip human genome
+curl -O http://hgdownload.soe.ucsc.edu/goldenPath/hg38/bigZips/hg38.fa.gz
+gunzip hg38.fa.gz
+
+# Step 5: Index the reference genome
+bowtie2-build hg38.fa hg38
+
+# Step 6: Align paired-end FASTQ files using Bowtie2
+bowtie2 -x hg38 -1 SRR26965367_1.fastq -2 SRR26965367_2.fastq -S SRR26965367_aln.sam
+bowtie2 -x hg38 -1 SRR26965368_1.fastq -2 SRR26965368_2.fastq -S SRR26965368_aln.sam
+bowtie2 -x hg38 -1 SRR26965369_1.fastq -2 SRR26965369_2.fastq -S SRR26965369_aln.sam
+bowtie2 -x hg38 -1 SRR26965370_1.fastq -2 SRR26965370_2.fastq -S SRR26965370_aln.sam
+
+# Step 7: Convert SAM to BAM
+samtools view -S -b SRR26965367_aln.sam > SRR26965367_aln.bam
+samtools view -S -b SRR26965368_aln.sam > SRR26965368_aln.bam
+samtools view -S -b SRR26965369_aln.sam > SRR26965369_aln.bam
+samtools view -S -b SRR26965370_aln.sam > SRR26965370_aln.bam
+
+# Step 8: Sort BAM files
+samtools sort SRR26965367_aln.bam -o SRR26965367_sorted.bam
+samtools sort SRR26965368_aln.bam -o SRR26965368_sorted.bam
+samtools sort SRR26965369_aln.bam -o SRR26965369_sorted.bam
+samtools sort SRR26965370_aln.bam -o SRR26965370_sorted.bam
+
+# Step 9: Mark duplicates using Picard
+curl -L -O https://github.com/broadinstitute/picard/releases/download/2.27.1/picard.jar
+java -jar picard.jar MarkDuplicates I=SRR26965367_sorted.bam O=SRR26965367_dedup.bam M=SRR26965367_metrics.txt
+java -jar picard.jar MarkDuplicates I=SRR26965368_sorted.bam O=SRR26965368_dedup.bam M=SRR26965368_metrics.txt
+java -jar picard.jar MarkDuplicates I=SRR26965369_sorted.bam O=SRR26965369_dedup.bam M=SRR26965369_metrics.txt
+java -jar picard.jar MarkDuplicates I=SRR26965370_sorted.bam O=SRR26965370_dedup.bam M=SRR26965370_metrics.txt
+
+# Step 10: Index BAM files
+samtools index SRR26965367_dedup.bam
+samtools index SRR26965368_dedup.bam
+samtools index SRR26965369_dedup.bam
+samtools index SRR26965370_dedup.bam
+
+# Step 11: Peak calling with MACS2
+macs2 callpeak -t SRR26965367_dedup.bam -f BAM -g hs -n SRR26965367 -q 0.01
+macs2 callpeak -t SRR26965368_dedup.bam -f BAM -g hs -n SRR26965368 -q 0.01
+macs2 callpeak -t SRR26965369_dedup.bam -f BAM -g hs -n SRR26965369 -q 0.01
+macs2 callpeak -t SRR26965370_dedup.bam -f BAM -g hs -n SRR26965370 -q 0.01
+
